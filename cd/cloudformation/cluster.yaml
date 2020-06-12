@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  The cluster
+
+Parameters:
+
+  ComponentName:
+    Type: String
+    Description: The component name
+  
+  MinNumberOfInstances:
+    Type: String
+    Description: The minimum number of instances
+    Default: 1
+  
+  MaxNumberOfInstances:
+    Type: String
+    Description: The maximum number of instances
+    Default: 1
+  
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id> 
+    Description: The subnets to attach to the instances
+
+  ElbSubnets:
+    Type: List<AWS::EC2::Subnet::Id> 
+    Description: The subnets to attach to the ELB
+
+  SecurityGroups:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The security groups to attach to the instances
+
+  ElbSecurityGroups:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The security groups to attach to the ELB
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.small
+    AllowedValues: [t1.micro, t2.nano, t2.micro, t2.small, t2.medium, t2.large, m1.small,
+      m1.medium, m1.large, m1.xlarge, m2.xlarge, m2.2xlarge, m2.4xlarge, m3.medium,
+      m3.large, m3.xlarge, m3.2xlarge, m4.large, m4.xlarge, m4.2xlarge, m4.4xlarge,
+      m4.10xlarge, c1.medium, c1.xlarge, c3.large, c3.xlarge, c3.2xlarge, c3.4xlarge,
+      c3.8xlarge, c4.large, c4.xlarge, c4.2xlarge, c4.4xlarge, c4.8xlarge, g2.2xlarge,
+      g2.8xlarge, r3.large, r3.xlarge, r3.2xlarge, r3.4xlarge, r3.8xlarge, i2.xlarge,
+      i2.2xlarge, i2.4xlarge, i2.8xlarge, d2.xlarge, d2.2xlarge, d2.4xlarge, d2.8xlarge,
+      hi1.4xlarge, hs1.8xlarge, cr1.8xlarge, cc2.8xlarge, cg1.4xlarge]
+    ConstraintDescription: must be a valid EC2 instance type.
+  
+  Environment:
+    Type: String
+    Description: The environment type
+    AllowedValues:
+      - DEV
+      - PRODUCTION
+      - STAGING
+      - QA
+    Default: DEV
+
+  AmiId:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Description: The AMI ID 
+
+  Port:
+    Type: String
+    Description: The port
+
+  LowerEnv:
+    Type: String
+    Description: The environment type
+
+  HealthCheckPath:
+    Type: String
+    Description: The health check path
+    Default: "/health"
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID
+
+Resources:
+
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${ComponentName}-${LowerEnv}"
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups: !Ref ElbSecurityGroups
+      Subnets: !Ref ElbSubnets
+      Type: application
+      Tags:
+        - Key: NAME
+          Value: !Sub "${ComponentName}-${LowerEnv}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckPath: !Ref HealthCheckPath
+      Port: !Ref Port
+      Name: !Sub "${ComponentName}-${LowerEnv}"
+      Protocol: HTTP
+      TargetType: instance
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: NAME
+          Value: !Sub "${ComponentName}-${LowerEnv}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Protocol: HTTP
+      Port: !Ref Port
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      Tags:
+        - Key: NAME
+          Value: !Sub "${ComponentName}-${LowerEnv}"
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+      HealthCheckGracePeriod: 60
+      HealthCheckType: EC2
+      TargetGroupARNs: [!Ref 'TargetGroup']
+      AutoScalingGroupName: !Sub "${ComponentName}-${LowerEnv}"
+      VPCZoneIdentifier: !Ref Subnets
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MinSize: !Ref MinNumberOfInstances
+      DesiredCapacity: !Ref MinNumberOfInstances
+      MaxSize: !Ref MaxNumberOfInstances
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+        WaitOnResourceSignals: true
+
+
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      # https://aws.amazon.com/premiumsupport/knowledge-center/cloudformation-custom-name/
+      KeyName: !Ref KeyName
+      ImageId: !Ref AmiId
+      SecurityGroups: !Ref SecurityGroups
+      InstanceType: !Ref InstanceType
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -xe
+          systemctl restart nginx
+          systemctl restart myapp
+          /usr/local/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingGroup
+
+
+Outputs:
+  ElbDns:
+    Description: The ELB URL
+    Value: !GetAtt ElasticLoadBalancer.DNSName
+  AutoScalingGroup:
+    Description: The autoscaling group name
+    Value: !Ref AutoScalingGroup
+  ElasticLoadBalancerFullName:
+    Description: The load balancer name
+    Value: !GetAtt  ElasticLoadBalancer.LoadBalancerFullName
+  ElasticLoadBalancerName:
+    Description: The ELB name
+    Value: !GetAtt ElasticLoadBalancer.LoadBalancerName
+

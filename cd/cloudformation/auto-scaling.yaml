@@ -1,0 +1,78 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  The mta-incoming cluster
+
+Parameters:
+
+  AutoScalingGroup:
+    Type: String
+    Description: The autoscaling group name
+
+  ElasticLoadBalancer:
+    Type: String
+    Description: The load balancer full name
+
+  ElasticLoadBalancerShortName:
+    Type: String
+    Description: The load balancer short name
+
+
+Resources:
+  # 1 Instance can handle about 12K requests
+  StepScalingPolicyRequestCount:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ExactCapacity
+      PolicyType: StepScaling
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      EstimatedInstanceWarmup: 30
+      StepAdjustments:
+      - MetricIntervalUpperBound: 19990
+        ScalingAdjustment: 3
+      - MetricIntervalLowerBound: 19990
+        MetricIntervalUpperBound: 29990
+        ScalingAdjustment: 4
+      - MetricIntervalLowerBound: 29990
+        MetricIntervalUpperBound: 39990
+        ScalingAdjustment: 5
+      - MetricIntervalLowerBound: 39990
+        MetricIntervalUpperBound: 49990
+        ScalingAdjustment: 6
+      - MetricIntervalLowerBound: 49990
+        MetricIntervalUpperBound: 59990
+        ScalingAdjustment: 6
+      - MetricIntervalLowerBound: 59990
+        MetricIntervalUpperBound: 69990
+        ScalingAdjustment: 7
+      - MetricIntervalLowerBound: 69990
+        MetricIntervalUpperBound: 79990
+        ScalingAdjustment: 8
+      - MetricIntervalLowerBound: 79990
+        MetricIntervalUpperBound: 89990 
+        ScalingAdjustment: 9
+      - MetricIntervalLowerBound: 89990
+        ScalingAdjustment: 10
+
+  RequestsCountAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      MetricName: RequestCount
+      AlarmName: !Sub "${ElasticLoadBalancerShortName}-HighRequestCount"
+      AlarmDescription: !Sub "High request count in the ${ElasticLoadBalancerShortName}"
+      Namespace: AWS/ApplicationELB
+      DatapointsToAlarm: 1
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      AlarmActions:
+        - !Ref StepScalingPolicyRequestCount
+      OKActions:
+        - !Ref StepScalingPolicyRequestCount
+      InsufficientDataActions:
+        - !Ref StepScalingPolicyRequestCount
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !Ref ElasticLoadBalancer
+      ComparisonOperator: GreaterThanOrEqualToThreshold

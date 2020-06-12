@@ -1,0 +1,30 @@
+[
+    {
+        "ParameterValue": "{{ env['S3_INFRA_BUCKET'] }}",
+        "ParameterKey": "InfraS3Bucket"
+    },
+    {
+        "ParameterValue": "{{ env['DEPLOYMENT_ENVIRONMENT'] }}",
+        "ParameterKey": "Environment"
+    },
+    {
+        "ParameterValue": "{{ env['MIN_NUMBER_OF_INSTANCES'] }}",
+        "ParameterKey": "MinNumberOfInstances"
+    },
+    {
+        "ParameterValue": "{{ env['MAX_NUMBER_OF_INSTANCES'] }}",
+        "ParameterKey": "MaxNumberOfInstances"
+    },
+    {
+        "ParameterValue": "{{ env['INSTANCE_TYPE'] }}",
+        "ParameterKey": "InstanceType"
+    },
+    {
+        "ParameterValue": "{{ env['COMPONENT_NAME'] }}",
+        "ParameterKey": "ComponentName"
+    },
+    {
+        "ParameterValue": "{{ env['PARAMETER_NAME'] }}",
+        "ParameterKey": "AmiId"
+    }
+]

@@ -1,0 +1,2 @@
+# User rules for jenkins
+jenkins ALL=(ALL) NOPASSWD:ALL

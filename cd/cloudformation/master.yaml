@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: > 
+  myapp 
+
+Parameters:
+
+  ComponentName:
+    Type: String
+    Description: The component name
+    Default: myapp
+
+  InfraS3Bucket:
+    Type: String
+    Description: The infra bucket name, this bucket holds the CF templates
+    Default: myapp-cloudformation-infra-templates
+
+  
+  MinNumberOfInstances:
+    Type: String
+    Description: The minimum number of instances
+    Default: 1
+  
+  MaxNumberOfInstances:
+    Type: String
+    Description: The maximum number of instances
+    Default: 1
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.small
+    AllowedValues: [t1.micro, t2.nano, t2.micro, t2.small, t2.medium, t2.large, m1.small,
+      m1.medium, m1.large, m1.xlarge, m2.xlarge, m2.2xlarge, m2.4xlarge, m3.medium,
+      m3.large, m3.xlarge, m3.2xlarge, m4.large, m4.xlarge, m4.2xlarge, m4.4xlarge,
+      m4.10xlarge, c1.medium, c1.xlarge, c3.large, c3.xlarge, c3.2xlarge, c3.4xlarge,
+      c3.8xlarge, c4.large, c4.xlarge, c4.2xlarge, c4.4xlarge, c4.8xlarge, g2.2xlarge,
+      g2.8xlarge, r3.large, r3.xlarge, r3.2xlarge, r3.4xlarge, r3.8xlarge, i2.xlarge,
+      i2.2xlarge, i2.4xlarge, i2.8xlarge, d2.xlarge, d2.2xlarge, d2.4xlarge, d2.8xlarge,
+      hi1.4xlarge, hs1.8xlarge, cr1.8xlarge, cc2.8xlarge, cg1.4xlarge]
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  Environment:
+    Type: String
+    Description: The environment type
+    AllowedValues:
+      - DEV
+      - PRODUCTION
+      - STAGING
+      - QA
+    Default: DEV
+
+  Port:
+    Type: String
+    Description: The port of the app
+    Default: 80
+
+  AmiId:
+    Type: String
+    Description: The AMI ID parameter store name
+    Default: /DeploymentConfig/App/AmiId
+
+  HealthCheckPath:
+    Type: String
+    Description: The health check path
+    Default: "/health"
+
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network
+        Parameters:
+          - Port
+      - Label:
+          default: Autoscaling
+        Parameters:
+          - MinNumberOfInstances
+          - MaxNumberOfInstances
+          - InstanceType
+          - AmiId
+      - Label:
+          default: Common
+        Parameters:
+          - ComponentName
+          - Environment
+      - Label:
+          default: Cloudformation infra
+        Parameters:
+          - InfraS3Bucket
+Mappings:
+
+  EnvironmentToLower:
+    PRODUCTION:
+      env: "production"
+    QA:
+      env: "qa"
+    DEV:
+      env: "dev"
+    STAGING:
+      env: "staging"
+
+  AccountEnv:
+    PRODUCTION:
+      Name: ProdRegionMap
+    DEV:
+      Name: ProdRegionMap
+    QA:
+      Name: ProdRegionMap
+    STAGING:
+      Name: ProdRegionMap
+
+  ProdRegionMap:
+    us-east-1:
+      PublicSubnets: ["subnet-005f57de560a86175", "subnet-0f8d7e8aa5e5c8392"]
+      PrivateSubnets: ["subnet-06c6146b2e917a81d", "subnet-089680e037c773ce1"]
+      VPCId: vpc-06ee8fa5770e232bd
+      VpcCidr: 10.10.0.0/16
+      Ec2KeyName: myapp
+
+Resources:
+
+#### Security and Roles ####
+
+  Security:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        VPCId: !FindInMap
+            - !FindInMap [AccountEnv, !Ref Environment, Name]
+            - !Ref "AWS::Region"
+            - VPCId
+        VpcCidr: !FindInMap
+            - !FindInMap [AccountEnv, !Ref Environment, Name]
+            - !Ref "AWS::Region"
+            - VpcCidr
+        ComponentName: !Ref ComponentName
+        Environment: !Ref Environment
+        LowerEnv: !FindInMap [EnvironmentToLower, !Ref Environment, env]
+        AppInstancePort: !Ref Port
+        AppAlbPort: !Ref Port
+      TemplateURL: !Sub "https://s3.amazonaws.com/${InfraS3Bucket}/${ComponentName}/${Environment}/security.yaml"
+
+#####################################################################################################################
+
+
+  Cluster:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ComponentName: !Ref ComponentName
+        MinNumberOfInstances: !Ref MinNumberOfInstances
+        MaxNumberOfInstances: !Ref MaxNumberOfInstances
+        Subnets:
+          Fn::Join:
+            - ","
+            - !FindInMap
+              - !FindInMap [AccountEnv, !Ref Environment, Name]
+              - !Ref "AWS::Region"
+              - PrivateSubnets
+        ElbSubnets:
+          Fn::Join:
+            - ","
+            - !FindInMap
+              - !FindInMap [AccountEnv, !Ref Environment, Name]
+              - !Ref "AWS::Region"
+              - PublicSubnets
+        VPCId: !FindInMap
+            - !FindInMap [AccountEnv, !Ref Environment, Name]
+            - !Ref "AWS::Region"
+            - VPCId
+        SecurityGroups: !Join [ ",", [!GetAtt Security.Outputs.AppInstanceSecurityGroup ]]
+        ElbSecurityGroups: !Join [ ",", [!GetAtt Security.Outputs.AppAlbSecurityGroup ]]
+        KeyName: !FindInMap
+            - !FindInMap [AccountEnv, !Ref Environment, Name]
+            - !Ref "AWS::Region"
+            - Ec2KeyName
+        InstanceType: !Ref InstanceType
+        Environment: !Ref Environment
+        AmiId: !Ref AmiId
+        Port: !Ref Port
+        HealthCheckPath: !Ref HealthCheckPath
+        LowerEnv: !FindInMap [EnvironmentToLower, !Ref Environment, env]
+      TemplateURL: !Sub "https://s3.amazonaws.com/${InfraS3Bucket}/${ComponentName}/${Environment}/cluster.yaml"
+
+  AutoScaling:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AutoScalingGroup: !GetAtt Cluster.Outputs.AutoScalingGroup
+        ElasticLoadBalancer: !GetAtt Cluster.Outputs.ElasticLoadBalancerFullName
+        ElasticLoadBalancerShortName: !GetAtt Cluster.Outputs.ElasticLoadBalancerName
+      TemplateURL: !Sub "https://s3.amazonaws.com/${InfraS3Bucket}/${ComponentName}/${Environment}/auto-scaling.yaml"
+        
+Outputs:
+  ElbDns:
+    Description: The ELB URL
+    Value: !GetAtt Cluster.Outputs.ElbDns

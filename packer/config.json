@@ -1,0 +1,41 @@
+{
+    "variables": {
+      "manifest_output_file": "{{env `PACKER_MANIFEST_FILE_PATH`}}",
+      "version": "1.0001",
+      "ami_name": "myapp"
+    },
+  
+    "builders": [{
+      "type": "amazon-ebs",
+      "ami_name": "{{user `ami_name`}}-{{user `version`}}.{{timestamp}}",
+      "tags": {
+        "Name": "{{user `ami_name`}}-{{user `version`}}.{{timestamp}}",
+        "OS_Name": "Ubuntu"
+      },
+      "region": "us-east-1",
+      "source_ami": "ami-068663a3c619dd892",
+      "instance_type": "t2.medium",
+      "ssh_username": "ubuntu",
+      "ami_description": "mMyapp AMI",
+      "associate_public_ip_address": true,
+      "ssh_interface": "public_ip",
+      "ena_support": true,
+      "ami_regions": ["us-east-1"]
+    }],
+    "provisioners": [{
+        "type": "file",
+        "source": "packer/pkg",
+        "destination": "~"
+    },
+    {
+        "type": "shell",
+        "script": "./packer/scripts/build.sh"
+    }],
+    "post-processors": [
+    {
+      "type": "manifest",
+      "output": "{{user `manifest_output_file`}}",
+      "strip_path": true
+    }
+  ]
+}

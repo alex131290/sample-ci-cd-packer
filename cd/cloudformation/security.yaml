@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Security configuration'
+Parameters:
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID
+
+  VpcCidr:
+    Type: String
+    Description: The VPC CIDR
+
+  AppAlbPort:
+    Type: String
+    Description: The frontend ALB Port
+    Default: 80
+
+  AppInstancePort:
+    Type: String
+    Description: The frontend ECS service Port
+    Default: 80
+
+  ComponentName:
+    Type: String
+    Description: The component name
+
+  Environment:
+    Type: String
+    Description: The environment type
+    AllowedValues:
+      - QA
+      - DEV
+      - PRODUCTION
+      - STAGING
+    Default: DEV
+
+  LowerEnv:
+    Type: String
+    Description: The environment type
+
+Resources:
+
+#### App instances security group ####
+
+  AppInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Enable access to the app instances'
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ComponentName}-${LowerEnv}-app-instance"
+        - Key: Environment
+          Value: !Ref Environment
+
+#### App ALB security group ####
+
+  AppAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Enable access to the App alb'
+      VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ComponentName}-${LowerEnv}-app-alb"
+        - Key: Environment
+          Value: !Ref Environment
+
+#### Ingress Rules ####
+
+  AppInstanceIngress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref AppInstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AppInstancePort
+      ToPort: !Ref AppInstancePort
+      SourceSecurityGroupId: !Ref AppAlbSecurityGroup
+      Description: Allow access to the App EC2 instances on the App port to the App ALB
+
+  AppSshInstanceIngress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref AppInstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: !Ref VpcCidr
+      Description: Allow SSH access
+
+  AppAlbIngress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref AppAlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AppAlbPort
+      ToPort: !Ref AppAlbPort
+      CidrIp: 0.0.0.0/0
+      Description: Allow access to the App ALB on the App port to the Internet
+      
+Outputs:
+  
+  AppInstanceSecurityGroup:
+    Description: The app instance security group
+    Value: !Ref AppInstanceSecurityGroup
+
+  AppAlbSecurityGroup:
+    Description: The App ALB security group
+    Value: !Ref AppAlbSecurityGroup
+
